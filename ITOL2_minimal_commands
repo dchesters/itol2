@@ -1,0 +1,941 @@
+
+# Herein, minimal commands used in the ITOL2 project are provided.
+# File of all commands used during development is also available on request, although that file is difficult to follow
+
+
+# ortholog inference steps are not shown, reviewer preference was to use set from Misof et al.
+# These are downloaded from :
+# http://datadryad.org/resource/doi:10.5061/dryad.3c0f1
+# http://dx.doi.org/10.5061/dryad.3c0f1
+
+# saved in location, example:
+# ~/scripted_analyses/insect_TOL_analysis/data/Misof_et_al_Supplementary_Archives/Supplementary_Archive_1/1kite_orthologset_hexapoda/1kite_100taxa_hexapoda_2_HMMer3/fa_dir
+
+
+
+ # download transcriptomes
+
+rm index.html*
+wget ftp://ftp.ncbi.nlm.nih.gov/genbank/tsa/G/
+wget ftp://ftp.ncbi.nlm.nih.gov/genbank/tsa/H/
+wget ftp://ftp.ncbi.nlm.nih.gov/genbank/tsa/I/
+
+
+ # should be saved as index.html...
+ # file is save in simple format, open in browser and copy to text file and save as tsa_list_20170712
+ ##  tsa.GAYY.1.fsa_nt.gz ; amino acid:tsa.GEEE.1.fsa_aa.gz
+
+grep "fsa_nt.gz" /home/douglas/scripted_analyses/insect_TOL_analysis/data/tsa_list_20170712 | wc -l
+ # v1:1469 transcriptomes .... July2017:2623 ! ... 2634
+
+# $limit_taxon = "Hexapoda"; 
+# run script 2-part ... job == 1 then job ==2 
+# example download command:
+# 	wget -c ftp://ftp.ncbi.nlm.nih.gov/genbank/tsa/tsa.GABT.mstr.gbff.gz
+# first part 3.5 hours
+# second part quick, makes new bash file 'transcriptome_download_commands'
+# ncbi directories assigned startign G, H, I, etc,
+# although at time of development, the links from the index page are not yet changed
+
+tsa_list=~/scripted_analyses/insect_TOL_analysis/data/tsa_list_20170712
+perl ~/scripted_analyses/insect_TOL_analysis/scripts/download_tsa_summaries.pl $tsa_list
+
+	# example screen output:
+	# number_of_files:1416; 	number_of_insects:319; 	total number genera found:230
+	# hexapods jul2017:
+	# number_of_files:2392; 	number_of_insects:614; total number genera found:445
+
+# output file found here
+~/scripted_analyses/insect_TOL_analysis/data/transcriptome_download_commands
+
+# also obtain outgroups,
+# for insects need occas:GAXJ02 campodea (diplura):GAYN02, pogonognathellus (collembola):GATD02, acerentomon (protura):GAXE02
+# for hexapods the outgroup will be a crustacean, perhaps speleonectes
+
+# to find a given taxon:
+zgrep "Speleonectes" *
+# tsa.GAJM.mstr.gbff.gz
+wget ftp://ftp.ncbi.nlm.nih.gov/genbank/tsa/G/tsa.GAJM.*.fsa_nt.gz
+
+
+# Process the ids in ortholog set.
+# set this variable in script: $process_misof_orthologs 	= 1;
+perl ~/scripted_analyses/insect_TOL_analysis/scripts/process_ortholog_seqs.pl
+
+
+# assuming navigated to correct directory
+
+# first unzip all_TSA.fsa_nt.tar.gz
+list_ortholog_files=(tsa.*.fsa_nt.gz)
+for i in ${!list_ortholog_files[*]}
+ do current_file=${list_ortholog_files[$i]};echo current file $i is $current_file
+ gunzip $current_file
+done
+
+# process transcriptome files
+list_ortholog_files=(tsa.*.fsa_nt)
+for i in ${!list_ortholog_files[*]}
+  do current_file=${list_ortholog_files[$i]};echo current file $i is $current_file
+  perl ~/usr_scripts/parse_ncbi_deflines_fasta.pl -in $current_file -format 1
+done
+# note, better to check parse_ncbi_deflines_ERROR_LOG, it will give indications if some of your files are truncated
+
+# transcoder run on 450 transcriptomes, produces 32 GB of output.
+#  [check if option for TD to ouptut just one orf per transcript]
+list_transcriptomes=(tsa.*.fsa_nt.b)
+for i in ${!list_transcriptomes[*]}; do file=${list_transcriptomes[$i]};echo "number:$i file:$file"
+  /home/douglas/software/transdecoder/TransDecoder-3.0.1/TransDecoder.LongOrfs -t $file
+done
+
+# example transdecoder output:
+#  >Gene.5::Belgica_antarctica_418280532::g.5::m.5 type:5prime_partial len:100 gc:universal Belgica_antarctica_418280532:1821-1522(-)
+
+# take longest ORF, ignore some superflerous output
+rm *.orf
+list_transcriptomes=(tsa.*.fsa_nt.b)
+perl ~/scripted_analyses/insect_TOL_analysis/scripts/process_orfs.pl ${list_transcriptomes[*]}
+# here delete all the transdecoder outputs
+
+# run Hamstr
+
+path=/home/douglas/scripted_analyses/insect_TOL_analysis/data/insect_TSA_processed2/
+list_transcriptomes=(tsa.*.fsa_nt.b.orf)
+
+
+for i in ${!list_transcriptomes[*]}; do transcriptome=${list_transcriptomes[$i]};echo "number:$i file:$transcriptome"
+  rm -rf /home/douglas/scripted_analyses/insect_TOL_analysis/data/insect_TSA_processed2/tmp/
+  rm -rf /home/douglas/scripted_analyses/insect_TOL_analysis/data/insect_TSA_processed2/hmm_search_tsa_1kite/
+  rm -rf /home/douglas/scripted_analyses/insect_TOL_analysis/data/insect_TSA_processed2/fa_dir_tsa_1kite_DMELA_5.40/
+  ~/software/hamstr/hamstr.v13.2.6/bin/hamstr_DC1.pl -sequence_file=$path$transcriptome -taxon=$transcriptome -silent -append -representative -hmmset=1kite -refspec=DMELA_5.40 -central -eval_hmmer=1e-20 -eval_blast=1e-20
+done
+
+# peptide sequences for longest orfs is in output file transcripts.fasta.transdecoder.pep
+
+# now have found orthologs in transcriptomes ....
+# check results, including quick filter of orthologs returned very few transcripts over species
+
+rm insectaNUCL*
+
+# perl ~/usr_scripts/parse_ortholog_results.pl -in insecta_ortholog_hits.all -out_prefix insectaNUCL -filter_duplicates -output_id_format 3
+perl ~/usr_scripts/parse_hamstr_results.pl -in hamstrsearch_tsa_1kite.out -out_prefix insectaNUCL -filter_duplicates -output_id_format 3
+ls insectaNUCL* | wc -l # 1400
+# ortholog labelled as follows: insectaNUCL.EOG5JQ2CR  insectaNUCL.EOG5RN8RH  insectaNUCL.EOG5ZGMV1
+# screen outputs orthologs filtered _due_to_not_many_tax, in this case:38
+
+# align transcripts of each ortholog.
+# conduct following step from scratch, ie dont try to restart after partially complete, 
+# otherwise can end up realigning already aligned orthologs, forming file.clo.clo.clo etc
+list_ortholog_files=(insectaNUCL*)
+no_cpus=2;count=0
+for i in ${!list_ortholog_files[*]}
+  do current_file=${list_ortholog_files[$i]}; echo current file $i is $current_file
+    # slow accurate command would be:
+    # /usr/local/bin/mafft --localpair --maxiterate 100 $current_file > $current_file.clo &
+    # quicker:
+      /usr/local/bin/mafft --retree 2 $current_file > $current_file.clo &
+  let count+=1
+  [[ $((count%no_cpus)) -eq 0 ]] && wait
+done
+
+# construct gene trees
+list_ortholog_alignments=(insectaNUCL*.clo)
+no_cpus=2;count=0
+for i in ${!list_ortholog_alignments[*]}
+  do current_file=${list_ortholog_alignments[$i]};echo $i $current_file
+#  fasttree_2.1.7 -slow -gamma $current_file > $current_file.orth_ft &
+  fasttree_2.1.7 -gtr -gamma $current_file > $current_file.orth_ft &
+  let count+=1
+  [[ $((count%no_cpus)) -eq 0 ]] && wait
+done
+
+
+ # PARALOGs
+ # this step should be quick
+for i in ${!list_ortholog_alignments[*]}
+  do current_file=${list_ortholog_alignments[$i]};echo $i $current_file
+  java -cp ~/software/phylotreepruner/src_and_wrapper_scripts/ PhyloTreePruner $current_file.orth_ft 5 $current_file 0.5 u
+done
+
+
+# assess characteristics of each ortholog.
+
+ # 1) COMPOSITIONAL HETEROGENEITY
+# here, a little easier to repeat gene tree inference on the filtered alignment.
+# 1-2 days running time
+
+list_ortholog_alignments=(insectaNUCL*.clo)
+phylobayes_path=~/software/phylobayes/phylobayes4.1b/data
+for i in ${!list_ortholog_alignments[*]}
+  do filename=${list_ortholog_alignments[$i]};filename_pruned=$filename'_pruned.fa'; # echo "$i phylobayesOUT.$filename.sample.ppht";
+  if [ -f phylobayesOUT.$filename'_sample.ppht' ];
+    then
+      echo already analysed ortholog $i $filename
+    else 
+      echo analyzing ortholog number $i name $filename
+  perl ~/usr_scripts/format_conversion.pl $filename_pruned $filename_pruned.phy fasta phylip
+  fasttree_2.1.7 -gtr -gamma $filename_pruned > $filename_pruned.orth_ft_pruned
+  $phylobayes_path/pb -d $filename_pruned.phy -T $filename_pruned.orth_ft_pruned -ncat 1 -dgam 1 -s -f -x 1 60 phylobayesOUT.$filename
+  $phylobayes_path/ppred -comp phylobayesOUT.$filename
+   fi
+done
+
+# typical output file name would be phylobayesOUT.insectaNUCL.EOG5DNCM5.clo_sample.ppht
+# command to count how many completed is ..... 
+ls phylobayesOUT.*.clo_sample.ppht | wc -l
+
+# after completed, will have huge number of files in the working directory, many can be removed here:
+rm phylobayesOUT.*.log phylobayesOUT.*.chain phylobayesOUT.*.currenttree phylobayesOUT.*.monitor
+rm phylobayesOUT.*.param phylobayesOUT.*.run phylobayesOUT.*.trace phylobayesOUT.*.treelist
+# required ouputs are phylobayesOUT.*.clo_sample.ppht
+
+
+rm *.RM1
+rm parse_phylobayes_LOG
+#perl ~/usr_scripts/parse_phylobayes_results.pl zs -1.1
+perl ~/usr_scripts/parse_phylobayes_results.pl pv 0.05
+
+# example numbers produced in ITOL2:
+# number phylobayes results files:754; count_heterogeneous (removed):91; count_homogeneous:663; %rm:12.0
+# NOTE: orthologs in which pb did not run on correctly (i.e. no output present) , are also removed under current settings
+
+
+
+ # 2) BRANCH-LENGTH VARIENCE
+
+# note this is just a quick solution to this problem, i have not come across formal software/methods for doing this
+# option to set in script: $calculate_average_bootstrap_support = 0;
+
+list_ortholog_alignments=(insectaNUCL*.clo)
+rm all_branch_results
+for i in ${!list_ortholog_alignments[*]}
+  do filename=${list_ortholog_alignments[$i]};echo $i $filename;
+  filename_pruned=$filename'_pruned.fa';fasttree_filename=$filename_pruned.orth_ft_pruned
+  rm table_for_R R_Variance_OUT
+  perl ~/usr_scripts/newick/calculate_branchlength_variance.pl $fasttree_filename -variance
+done
+
+
+rm blh_filtered_files
+# need to do some calculations in R:
+t1<-read.table("all_branch_results", header=T, row.names=1)
+boxplot(t1[,2], ylab = "Branch-length variance", cex.lab = 1.4, ylim=c(0.15, 0.25) ) # 
+# check distribution, my results were v1, outliers > 0.106; v2 outliers > 0.22
+# insert your value into the following TWO commands
+# it will print a list of the orthologs to file which need retaining
+length((1:length(t1[,2]))[t1[,2]>=0.22]) # 37
+new_filenames<-        attr(t1[(1:length(t1[,2]))[t1[,2]<0.22],], "row.names")
+write(new_filenames, file = "blh_filtered_files",ncolumns = 1, append = FALSE, sep = " ")
+# here leave R env
+
+rm *.RM2
+#   set this variable $TOL_version = 1;
+perl ~/scripted_analyses/insect_TOL_analysis/scripts/filename_processing.pl blh_filtered_files
+
+ls *.RM2 | wc -l # 718; 1023
+
+
+
+ # 3) INFORMATION CONTENT
+ # information content calculated for each ortholog,
+ # using Mare, runs on a supermatrix and partition file
+
+rm current_supermatrix2 insectaNUCL.smatrix8 partitionfile2 insectaNUCL.partitionfile8 charsetfile2 insectaNUCL.charsetfile8
+alignments=(insectaNUCL*.clo_pruned.fa)
+perl ~/usr_scripts/concatenate_v2.pl -missing_data_char ? -remove_accession 2 -matrices ${alignments[*]}
+mv current_supermatrix2 insectaNUCL.smatrix8; mv partitionfile2 insectaNUCL.partitionfile8; mv charsetfile2 insectaNUCL.charsetfile8
+# requires 10gb memory, 
+rm MARE_LogScreen
+mare_v01.2 insectaNUCL.charsetfile8 insectaNUCL.smatrix8 > MARE_LogScreen
+mv ./results/insectaNUCL.smatrix8_reduced .
+mv ./results/insectaNUCL.charsetfile8_reduced .
+grep "rel. Information : 0.[01234]" MARE_LogScreen | wc -l
+
+# example values when run under different settings:
+# -t 2 -d 1.9  = nr of taxa: 201; nr of partitions: 123
+#      -d 0.5  = nr of taxa: 209; nr of partitions: 384
+#      -d 0.1  = nr of taxa: 218; nr of partitions: 638
+#         0.05 = nr of taxa: 218; nr of partitions: 698
+#      -d 0.01 = nr of taxa: 219; nr of partitions: 750
+# -t 4 -d 0.01 = nr of taxa: 221; nr of partitions: 743
+# -t 3 -d 0.05 = nr of taxa: 218; nr of partitions: 698
+# / 756
+# nb. itol2 v1 used: -t 3 -d 0.05
+
+
+
+
+# 4) ALIGNMENT QUALITY
+# uses gblocks. aliscore might be an alternative.
+
+# here are gblock command line settings:
+#-b1= 	Minimum Number Of Sequences For A Conserved Position; (50% of the number of sequences + 1)
+#-b2= 	Minimum Number Of Sequences For A Flank Position ; (85% of the number of sequences)
+#-b3= 	Maximum Number Of Contiguous Nonconserved Positions (8)
+#-b4= 	Minimum Length Of A Block; (10)
+# b5=allow gap positions with none; 
+#-b1=19 -b2=21  -b3=8 -b4=10 -b5=n 
+# default allow gao positions with non, although this removes drastically, i have changed to half
+# file gblocks_ortholog_results list names of orthologs retained
+
+rm *.RM4 *-gb.htm *-gb gb_screenout* gblocks_ortholog_results
+list_ortholog_alignments=(insectaNUCL*.clo)
+for i in ${!list_ortholog_alignments[*]}
+  do filename=${list_ortholog_alignments[$i]};filename_pruned=$filename'_pruned.fa'
+  if [ -f $filename_pruned ];
+    then
+
+      #######################################################################################
+      echo found tree for pruned alignment named $filename_pruned
+      rm gb_screenout
+      Gblocks_0.91b $filename_pruned -t=p -b5=h > gb_screenout
+    #  cp gb_screenout gb_screenout.$filename_pruned
+      val=$(grep "Gblocks alignment:  0 positions (0 %) in 0 selected" gb_screenout | wc -l)
+      if [ $val -eq 1 ]; then
+        echo delete
+        else
+        echo keep
+	echo $filename_pruned >> gblocks_ortholog_results
+        cp $filename_pruned $filename_pruned.RM4
+       fi
+      #######################################################################################
+
+    else 
+      echo CANT find tree for pruned alignment named $filename_pruned
+  fi
+done
+
+
+# count how many orthologs retained after this fitering type:
+ls *.RM4 | wc -l # 747
+
+
+
+ # 5) BOOTSTRAP SUPPORT
+ # remove orthologs with low boot support, 
+ # this has been shown to improve internode certainty in overall tree
+ # set this variable in script: $bootstrap_cutoff = 0.70;
+
+rm *.RM5
+list_ortholog_alignments=(insectaNUCL*.clo)
+for i in ${!list_ortholog_alignments[*]}
+  do filename=${list_ortholog_alignments[$i]};filename_pruned=$filename'_pruned.fa'
+  if [ -f $filename_pruned.orth_ft_pruned ];
+    then
+     # echo found tree for pruned alignment named $filename_pruned.orth_ft_pruned
+     # cat $filename_pruned.orth_ft_pruned
+      perl ~/usr_scripts/newick/calculate_branchlength_variance.pl $filename_pruned.orth_ft_pruned -bootstrap
+    else 
+      echo CANT find tree for pruned alignment named $filename_pruned
+  fi
+done
+
+# count what has been retained
+ls *.RM5 | wc -l
+ls *.orth_ft_pruned | wc -l
+# 715 / 756
+
+
+# for making an r table of results:
+# perl ~/scripted_analyses/insect_TOL_analysis/scripts/parse_ortholog_bias_scores.pl
+
+
+# have calculated 5 different characteristics for ech ortholog, 
+# now make a matrix considering all of these
+
+# $ITOL_version = 2
+rm *.RMmulti
+perl ~/scripted_analyses/insect_TOL_analysis/scripts/multiple_bias_filter.pl
+# example screen output:
+# pb:662, BL:717, MR:697, ALN:746, BOOT:714
+# out of 755, presnt all three:585
+
+# if wish to depict with venn diagram:
+/usr/lib/jvm/java-6-openjdk-amd64/jre/bin/java -Xms64m -Xmx512m -jar /home/douglas/software/venn_diagrams/VennMaster-0.37.5/VennMaster-0.37.5/venn.jar $*
+# count final set of orthologs after all filtering:
+ls *.RMmulti | wc -l
+
+# there is one ortholog crashing partition finder, delete it here.
+# crash occurs after screen prints: 'Finished subset 472/625'
+# [ortholog 472 is gene471_EOG5QZ633], ortholog 473 is EOG5R228R
+mv insectaNUCL.EOG5R228R.clo_pruned.fa.RMmulti insectaNUCL.EOG5R228R.clo_pruned.fa.RMmulti.problem_orth
+
+# make supermatrix
+alignments=(insectaNUCL*.RMmulti)
+rm current_supermatrix2 insctNUCL.smatrix.RMmulti partitionfile2 insctNUCL.partitionfile.RMmulti charsetfile2 insctNUCL.charsetfile.RMmulti partitionfinder_datablock insctNUCL.partitfind.RMmulti
+perl ~/usr_scripts/concatenate_v2.pl -missing_data_char ? -remove_accession 2 -data_type PROT -matrices ${alignments[*]}
+mv current_supermatrix2 insctNUCL.smatrix.RMmulti; mv partitionfile2 insctNUCL.partitionfile.RMmulti; mv charsetfile2 insctNUCL.charsetfile.RMmulti; mv partitionfinder_datablock insctNUCL.partitfind.RMmulti;
+grep ">" insctNUCL.smatrix.RMmulti | wc -l # 222
+
+# remove invarient, ambiguous sites, 
+# [consider retaining parsimony uninformative, these might be informative for branch length purposes?]
+rm insctNUCL.smatrix.RMmulti.epu new_partitions.rax new_partitions.cs new_partitions.pf insctNUCL.smatrix.RMmulti.epu.partit_rax insctNUCL.smatrix.RMmulti.epu.partit_cs insctNUCL.smatrix.RMmulti.epu.partit_pf
+perl ~/usr_scripts/alignment_processing/exclude_parsimony_uninformative.pl -in insctNUCL.smatrix.RMmulti -out insctNUCL.smatrix.RMmulti.epu -data_type PROT -remove_invar -remove_ambig -partition_file insctNUCL.partitionfile.RMmulti
+mv new_partitions.rax insctNUCL.smatrix.RMmulti.epu.partit_rax; mv new_partitions.cs insctNUCL.smatrix.RMmulti.epu.partit_cs; mv new_partitions.pf insctNUCL.smatrix.RMmulti.epu.partit_pf
+
+# as huge dataset, for partition scheming, neccessary to run on reduced sample
+rm insctNUCL.smatrix.RMmulti.epu.sample40 insctNUCL.smatrix.RMmulti.epu.sample40.phy
+perl /home/douglas/usr_scripts/sample_db.pl insctNUCL.smatrix.RMmulti.epu 40 2 insctNUCL.smatrix.RMmulti.epu.sample40 NULL
+perl ~/usr_scripts/format_conversion.pl insctNUCL.smatrix.RMmulti.epu.sample40 insctNUCL.smatrix.RMmulti.epu.sample40.phy fasta phylip
+
+# define meta-parititons with partition finder
+# check settings in partition_finder.configA and partition_finder.configB
+# then make new config file with new set of orthologs 
+cat partition_finder.configA insctNUCL.smatrix.RMmulti.epu.partit_pf partition_finder.configB > partition_finder.cfg
+
+# memory intensive analysis [run on DELL tower]
+# copy files insctNUCL.smatrix.RMmulti.epu.sample40.phy and partition_finder.cfg
+# to ~/scripted_analyses/insect_TOL_analysis/transcriptomes/partition_finder/
+# then pf command is:
+# python ~/software/partition_finder/partitionfinder-2.1.1/PartitionFinderProtein.py --raxml --rcluster-max 20 --force-restart partition_finder
+# --rcluster-max 4000 proved to be prohibitivly slow (after 1 week: >61 gb memory, 475 subsets, step 150 of up to 623) ... 2000 took 5 days
+python ~/software/partition_finder/partitionfinder-2.1.1/PartitionFinderProtein.py --raxml --processors 30 --rcluster-max 2000 partition_finder
+
+
+# here, based on reviewer suggestion and similar to analysis included in Misof et al,
+# make reduced matrix in which orthologs not having sequence for set of key taxonomic groups (proably orders),
+# are removed.
+# these usually termed decisive matrices
+# define ortholog file names in the script:insectaNUCL*.RMmulti
+
+supermatrix=insctNUCL.smatrix.RMmulti
+rm insectaNUCL.*.clo_pruned.fa.RMmulti_order
+# script below reads taxa present in supermatrix, then scans folder for files: insectaNUCL*.RMmulti
+# for each ortholog , if order representation >= cutoff, copy ortholog ortholog_order
+perl ~/scripted_analyses/insect_TOL_analysis/scripts/taxon_filter_orthologs.pl $supermatrix 
+ls insectaNUCL.*.clo_pruned.fa.RMmulti_order | wc -l # 475 
+ls insectaNUCL*.RMmulti | wc -l # 624
+alignments=(insectaNUCL*.RMmulti_order)
+rm current_supermatrix2 insctNUCL.smatrix.RMmulti_order partitionfile2 insctNUCL.partitionfile.RMmulti_order charsetfile2 insctNUCL.charsetfile.RMmulti_order partitionfinder_datablock insctNUCL.partitfind.RMmulti_order new_metapartitions new_metapartitions_INFO
+perl ~/usr_scripts/concatenate_v2.pl -missing_data_char ? -remove_accession 2 -data_type PROT -metapartitions best_scheme.txt -matrices ${alignments[*]}
+mv current_supermatrix2 insctNUCL.smatrix.RMmulti_order; mv partitionfile2 insctNUCL.partitionfile.RMmulti_order; mv charsetfile2 insctNUCL.charsetfile.RMmulti_order; mv partitionfinder_datablock insctNUCL.partitfind.RMmulti_order;
+rm insctNUCL.smatrix.RMmulti_order.phy
+perl ~/usr_scripts/format_conversion.pl insctNUCL.smatrix.RMmulti_order insctNUCL.smatrix.RMmulti_order.phy fasta phylip
+# transfer files to high capacity computer for tree building:insctNUCL.smatrix.RMmulti_order.phy AND new_metapartitions
+# [exclude_parsimony_uninformative ommited here, awkward to modify to run on metapartitioned charset file.]
+
+
+cd ~/scripted_analyses/insect_TOL_analysis/backbone_tree/
+
+# count boot replicates completed
+cat RAxML_bootstrap.*.RMmulti_order* | wc -l
+
+rm insctNUCL.bootstrap
+cat RAxML_bootstrap.*.RMmulti_order* > insctNUCL.bootstrap.RMmulti_order
+
+# summarize the bootstrap analysis
+rm insctNUCL.RMmulti.sumtrees
+sudo sumtrees.py --min-clade-freq=0.0 --log-frequency=10 --to-newick --replace --support-as-labels --burnin=0 --output=insctNUCL.bootstrap.RMmulti_order.sumtrees insctNUCL.bootstrap.RMmulti_order
+rm insctNUCL.RMmulti.sumtrees.procd
+perl ~/usr_scripts/newick/process_raxmlEPA_outtree.pl insctNUCL.bootstrap.RMmulti_order.sumtrees
+rm insctNUCL.RMmulti.sumtrees.tax
+perl ~/usr_scripts/species_to_complete_taxonomies.pl -seqfile insctNUCL.bootstrap.RMmulti_order.sumtrees.procd -output insctNUCL.bootstrap.RMmulti_order.sumtrees.tax -node 6960 -newick
+
+# pdf of phylogeny is saved here
+# ~/scripted_analyses/insect_TOL_analysis/results_figures_tables/insctNUCL.bootstrap.RMmulti_order.sumtrees.tax.pdf
+# only topo difference i can find:Manduca_sexta Bombyx_mor are switched round. otherwise identical.
+
+
+ #  main transcriptome tree search. high memory demand for this step
+
+perl ~/usr_scripts/format_conversion.pl insctNUCL.smatrix.RMmulti.epu insctNUCL.smatrix.RMmulti.epu.phy fasta phylip
+
+# first, no partition:
+
+mpirun -n 4 raxmlHPC-MPI-8.2.4 -f a -x 123 -p 123 -# 500 -s insctNUCL.smatrix.RMmulti.epu.phy -n insectaNUCL.smatrix.RMall -m PROTCATBLOSUM62 -c 24
+
+# then with partition
+# partitions were defined by partit finder, in the transcriptomes folder 
+# file is /home/dell/scripted_analyses/insect_TOL_analysis/transcriptomes/best_scheme_2017DEC.txt
+# manually remove all but raxml style defiintions, save as 
+# /home/dell/scripted_analyses/insect_TOL_analysis/backbone_tree/best_scheme_2017DEC.raxml
+# it might complain about too few states in some partitions, just need to combine these
+# JTT, Subset86 = 53189-53256, 158101-158154, 163391-163503, 256916-256984
+# parttion finder tests some models which cant be used with PROTCAT,
+# best to provide PF with a list of models to tesdt, with these omited
+# for now just change these in the partit file, e.g. LG4X / LG4M to LG (making file best_scheme_2017DEC.raxml_test)
+# those models do work with PROTGAMMA, though the computer cannot handle gamma anyway, for this size matrix.
+
+mpirun -n 2 raxmlHPC-MPI-8.2.4 -f a -x 456 -p 456 -# 200 -s insctNUCL.smatrix.RMmulti.epu.phy -n insectaNUCL.smatrix.RMall.partit2 -m PROTCATBLOSUM62 -c 24 -q best_scheme_2017DEC.raxml_test
+
+# as very slow, might run this on additional computers,
+#  but warning, when running extra boot replicates , MUST change seed values in raxml command.
+
+
+# how many bootstrap reps:
+cat RAxML_bootstrap.insectaNUCL.smatrix.RMall.partit*.PID.* | wc -l # 108
+# make single file
+rm insctNUCL.bootstrap
+cat RAxML_bootstrap.insectaNUCL.smatrix.RMall.partit*.PID.* > insctNUCL.bootstrap
+
+
+# write protected for some reason, so run command on its own:
+rm insctNUCL.RMmulti.sumtrees
+# not sure why sudo is required to run this command
+sudo sumtrees.py --min-clade-freq=0.0 --log-frequency=10 --to-newick --replace --support-as-labels --burnin=0 --output=insctNUCL.RMmulti.sumtrees insctNUCL.bootstrap
+rm insctNUCL.RMmulti.sumtrees.procd
+perl ~/usr_scripts/newick/process_raxmlEPA_outtree.pl insctNUCL.RMmulti.sumtrees
+rm insctNUCL.RMmulti.sumtrees.tax
+perl ~/usr_scripts/species_to_complete_taxonomies.pl -seqfile insctNUCL.RMmulti.sumtrees.procd -output insctNUCL.RMmulti.sumtrees.tax -node 6960 -newick
+
+# root tree (export tree in figtree) at acerentomon
+java -Xms64m -Xmx512m -jar /home/douglas/software/figtree/FigTree_v1.4.1/lib/figtree.jar $*
+
+# make tree with branchlengths
+
+ # consenus tree from RMmulti:
+consensus=~/scripted_analyses/insect_TOL_analysis/backbone_tree/insctNUCL.RMmulti.sumtrees.procd
+matrix=/home/douglas/scripted_analyses/insect_TOL_analysis/transcriptomes/insctNUCL.smatrix.RMmulti.epu
+fasttree_2.1.7 -nosupport -gamma -nome -mllen -intree $consensus < $matrix > inNUCL.RMmulti.FtBl
+# make sure script is not set to rm branchlen's
+perl ~/usripts/species_to_complete_taxonomies.pl -seqfile inNUCL.RMmulti.FtBl -output inNUCL.RMmulti.FtBl.tax -node 6960 -newick
+java -Xms64m -Xmx512m -jar /home/douglas/software/figtree/FigTree_v1.4.1/lib/figtree.jar $*
+
+
+# calculate internode certainty based on gene trees, quite stringent test of node support
+
+ # remove accessions, make phylip files
+alignments=(insectaNUCL*.clo_pruned.fa)
+rm insectaNUCL*.clo_pruned.fa.sed insectaNUCL*.clo_pruned.fa.sed.phy
+for i in ${!alignments[*]}
+  do filename=${alignments[$i]};echo current file $i is $filename;
+  cat $filename | sed -e 's/[|].*//' > $filename.sed
+  perl ~/usr_scripts/format_conversion.pl $filename.sed $filename.sed.phy fasta phylip
+  rm $filename.sed
+done
+
+ # make gene trees with raxml
+ # do all orthologs not just filtered ones, might need others later.
+  # run on high power computer
+ # seems IC doesnt use blength information. probably dont need final optimization , so use option -F
+rm RAxML_*.insectaNUCL.*.clo_pruned.fa.sed.phy
+alignments=(insectaNUCL*.clo_pruned.fa.sed.phy)
+no_cpus=25;count=0
+for i in ${!alignments[*]}
+  do filename=${alignments[$i]};echo current file $i is $filename;
+  raxmlHPC-8.2.4 -F -s $filename -n $filename -m PROTCATBLOSUM62 -c 24 -p 123 &
+  let count+=1
+  [[ $((count%no_cpus)) -eq 0 ]] && wait
+done
+
+/home/douglas/scripted_analyses/insect_TOL_analysis/transcriptomes/
+ls RAxML_*.insectaNUCL.*.clo_pruned.fa.sed.phy | wc -l
+
+# this contains gene-trees from orthologs which were filtered for concatenated tree searching
+# ie you might consider it inapproriate
+cat /home/douglas/scripted_analyses/insect_TOL_analysis/transcriptomes/RAxML_result.insectaNUCL.*.clo_pruned.fa.sed.phy > transcriptome_gene_trees
+
+# prefer this one, script to make file of gene trees only from filtered orthologs
+rm filtered_genetrees
+perl ~/scripted_analyses/insect_TOL_analysis/scripts/cat_gene_trees_from_certain_orthologs.pl
+
+# transcriptome summary tree looks like ....... ,(Euwallacea_fornicatus,Ips_typographus)1.00)1
+# gene tree looks like ..........                ,((Ectopsocus_briggsi,(Liposcelis_
+# transcriptome_gene_trees has all orthologs, including those not used to make the concat tree,
+# you provably need instead filtered_genetrees
+
+transcriptome_sumtree=insctNUCL.RMmulti.sumtrees.procd
+rm RAxML*transcriptome_sumtree.IC1 raxml_IC_screenout
+raxmlHPC-8.2.4 -f i -t $transcriptome_sumtree -z filtered_genetrees -n transcriptome_sumtree.IC1 -m PROTCATBLOSUM62 > raxml_IC_screenout
+
+# error messages returned on initial runs:
+# ERROR: Cannot find tree species: Aulacus_burquei
+grep "Aulacus_burquei" transcriptome_gene_trees | wc -l # 902
+grep "Aulacus_burquei" $transcriptome_sumtree
+# that error was due to using the old tree, corrected, still get:
+# ERROR: Cannot find tree species: Chrysomela_populi
+grep "Chrysomela_populi" transcriptome_gene_trees | wc -l # only in 3!
+grep "Chrysomela" $transcriptome_sumtree
+
+# need to open transcriptome_gene_trees, manually delete lines with Chrysomela_populi, Epiphyas_postvittana
+
+# note, IC annotated like this:
+#  :0.90000000000000002220[0.959,0.959],Diaphorina_citri
+
+# 2 methods use to calcualte IC (also note , there are other indexes output)
+# intree=RAxML_Corrected_Probabilistic_IC_Score_BranchLabels.transcriptome_sumtree.IC1
+intree=RAxML_Corrected_Lossless_IC_Score_BranchLabels.transcriptome_sumtree.IC1
+
+rm RAxML_Corrected_Lossless_IC_Score_BranchLabels.transcriptome_sumtree.IC1.procd NUCLsumtree.ICl
+perl ~/usr_scripts/newick/process_raxmlEPA_outtree.pl $intree 4
+mv RAxML_Corrected_Lossless_IC_Score_BranchLabels.transcriptome_sumtree.IC1.procd NUCLsumtree.ICl
+
+
+# this section very similar to mtgenome section of SOPHI pipeline
+
+# search NCBI nucleotide for 
+("complete" [TITLE] AND "genome" [TITLE] AND ("mitochondrial" [TITLE] OR "mitochondrion" [TITLE])) AND insecta [organism]
+# send to file, summary. save as insect_mtgenome_completeONLY_summary
+
+# then add partial genomes if they are from a genus not present in the completes. so:
+("partial" [TITLE] AND "genome" [TITLE] AND ("mitochondrial" [TITLE] OR "mitochondrion" [TITLE])) AND insecta [organism]
+# save as insect_mtgenome_partialONLY_summary
+
+# retreive outgroups:
+NC_022674.1,NC_026666.1,NC_010533.1
+# save complete sequences, genbank full format, as sequence_OG.gb
+
+# retrive and filter complete mtgenomes
+rm tax_parse_genbank_summary_ACCESSIONS
+perl ~/usr_scripts/taxon_parse_genbank_summary_results.pl insect_mtgenome_completeONLY_summary 6960 3
+# gives accessions in output file, proably several lines which need pasting to NCBI search box seperatly
+# save genbank full
+mv insecta_mtgenome_genus insecta_mtgenome_genus_OLD1
+cat sequence_OG.gb sequence1.gb sequence2.gb sequence3.gb sequence4.gb > insecta_mtgenome_genus
+
+# retreive and filter partials
+rm tax_parse_genbank_summary_ACCESSIONS
+perl ~/usr_scripts/taxon_parse_genbank_summary_results.pl insect_mtgenome_partialONLY_summary 6960 3
+cat sequence1.gb sequence2.gb sequence3.gb > insecta_mtgenome_genus_partials
+rm sequence1.gb sequence2.gb sequence3.gb
+
+
+perl parse_translations_from_genbank_flatfile.pl -in insecta_mtgenome_genus -out insecta_mtgenome_genus.prot -out_suffx NULL -id_format 4 -preferred_annotation_field 1
+
+
+# next script uses a log file, which looks something like:
+# entry:882 tax:Acrotona_obfuscata ac:KT780620.1 fAM:Staphylinidae Order:Coleoptera genus:Acrotona species:Acrotona_obfuscata lineage:class:Insecta no_rank:Dicondylia subclass:Pterygota infraclass:Neoptera cohort:Holometabola order:Coleoptera suborder:Polyphaga infraorder:Staphyliniformia superfamily:Staphylinoidea family:Staphylinidae no_rank:Tachyporinae_group subfamily:Aleocharinae tribe:Athetini genus:Acrotona species:Acrotona_obfuscata 
+# entry:1050 tax:Agyrtodes_labralis ac:JX412779.1 fAM:Leiodidae Order:Coleoptera genus:Agyrtodes species:Agyrtodes_labralis lineage:class:Insecta no_rank:Dicondylia subclass:Pterygota infraclass:Neoptera cohort:Holometabola order:Coleoptera suborder:Polyphaga infraorder:Staphyliniformia superfamily:Staphylinoidea family:Leiodidae subfamily:Camiarinae genus:Agyrtodes species:Agyrtodes_labralis 
+# inputs are 1:logfile 2:gb_flatfile 3:tax level
+# reads log file to record which genera have a partial genome
+# then reads flat file of complete mtgenomes, checks to see which of the partial genera are already represented.
+# prints ouput file listing partials needed
+
+file1=insect_mtgenome_partialONLY_summary.taxon_parse_genbank_summary_results_LOG
+rm partial_mtgenomes_needed
+perl ~/usr_scripts/add_partial_mtgenomes.pl $file1 insecta_mtgenome_genus genus
+
+
+
+# genera with a partial genome and no complete genome:
+partials=(Abachrysa Acanthotermes Acronicta Acrotona Adelges Afrocampsis Agabus Agathidium Agonum Agriotes Agyrtodes Aiceona Alobaldia Aloconota Altica Alucita Ammianus Amphiops Ancistrotermes Angularitermes Anisodactylus Anisosticta Anoecia Anoplotrupes Anthonomus Anthrenus Apatelopteryx Aphantopus Aphelocheirus Aphidius Aphodius Aphrophora Aphthona Apoderus Apteropeda Arachnobas Archisepsis Arescus Asiemphytus Asphondylia Aspidiphorus Astenus Atheta Attagenus Australicapitona Bacillus Barynotus Basidentitermes Batophila Bembidion Birmella Bisnius Bittacomorphella Boettcheria Bolitobius Bolivaritettix Boros Brachinus Brachycerus Brachygluta Brachynopus Brachypterolus Brachyta Brachytemnus Bradybatus Bradycellus Bradysia Bromius Broscus Bruchidius Brumptomyia Brundinia Bubas Caccobius Caetetermes Calleida Calvia Calvisia Cameraria Cardiochiles Cassida Celyphus Cephalonomia Ceratosolen Ceratovacuna Ceruchus Ceutorhynchus Chaetocnema Chaetosiphella Chaitophorus Chamaemyia Chapuisia Characopygus Cheilomenes Cheironitis Chilotomina Chirotenon Chlorophorus Chloroprocta Chonosia Chorotypus Chromatomyia Chrysolina Chrysomela Chrysops Cicindela Cinara Cionus Cis Clanoptilus Cleptocaccobius Climacia Clytra Coccidula Coenonympha Colaspidea Colaspidema Coptotettix Cordulia Coridius Corynis Craspedophorus Crataraea Crepidodera Cryptocephalus Cryptopleurum Cryptotermes Cryptotympana Cybister Cycloneda Cymbiodyta Cyphonistes Cyrilliotermes Cyrtanaspis Daktulosphaira Dendroleon Deporaus Dermestes Dexiogyia Diachasmimorpha Diaclina Diadromus Diartiger Dibolia Diceroprocta Dicranocephalus Dicronychus Dicuspiditermes Digitonthophagus Diplonychus Disteniazteca Dolichopus Dolichorhinotermes Donacia Dorcus Dorytomus Doydirhynchus Drepana Drepanepteryx Drepanocerus Drilonius Dysstroma Elmis Emmelina Endomychus Endrosis Enicmus Entomoscelis Eoxenos Epermenia Epiphyas Ericmodes Ernobius Erthesina Espanoliella Ethmia Euaesthetus Eucallipterus Eucorysses Eudasyphora Eudonia Eumantispa Euoniticellus Euplectus Eurysternus Eusphalerum Eutetrapha Euurobracon Evandromyia Exema Exitianus Exosoma Fleutiauxia Fontecilla Formosatettix Gaeana Gastrallus Gastrophysa Geodromicus Glaphyrus Glischrochilus Glyptotermes Greenidea Grylloblatta Gyrinus Gyrohypnus Habrocerus Habrodera Habrophlebiodes Halictus Haliplus Halyzia Harmonia Hartigia Heleodromia Helictopleurus Hellula Helotrephes Heteronitis Hexagonia Himacerus Hippodamia Hodotermopsis Homallotermes Homolobus Hydroporus Hydrothassa Hylesinus Hylobius Hylurgops Hypera Hypocassida Hypomedon Ichneutes Imatidium Inachis Inocellia Ischnomera Ischnosoma Ischnusia Italochrysa Janus Kateretes Kemneritermes Kolla Kurisakia Kyklioacalles Labidostomis Labidura Laccoptera Lachnaia Lacosoma Lamprigera Larinus Lasioderma Lasioglossum Lathrobium Lebia Leiodes Leptogaster Leptomona Leptomyxotermes Leptura Leucochrysa Liatongus Libnetis Limnius Linaeidea Liophloeus Lissodema Loberonotha Longipeditermes Longitarsus Lopheros Lordithon Luperomorpha Macrocentrus Magicicada Mantura Marmarodeceia Mecinus Medon Megalophasma Megymenum Meimuna Melanotus Melasis Melolontha Meru Mesocapnia Mesomelena Meteorus Metopsia Metrius Micrambe Micropterix Micropygomyia Mikadonius Milichus Mirax Monocellicampa Monomachus Morellia Mucroberotha Myiodactylus Nallachius Nanophyes Nargus Necydalis Negastrius Negha Nemoptera Neobellieria Neobisnius Neocrepidodera Neohirasea Neophonus Neothoracaphis Nevrorthus Nipponeurorthus Niptus Noctua Nosodendron Nothancyla Nudobius Ocyptamus Ocypus Odontocheila Oegoconia Olenecamptus Omalisus Omalium Omus Oncotympana Oniticellus Onitis Ontholestes Onthophagus Oreina Orestes Orestia Orophyllus Orosius Orthocis Orthognathotermes Oryzaephilus Osmia Osphya Othius Otiorhynchus Oulema Oxyomus Pachybrachis Pachycephus Pambolus Paratenetus Parocyusa Paroligoneurus Paromalus Parrhinotermes Pedetontinus Peloridora Peltodytes Pennisetia Periphyllus Perotis Peuceptyelus Phaedon Phaenocarpa Phalops Phanerotoma Pheletes Philonthus Philotrypesis Phloeomyzus Phloeopora Phloiophilus Phratora Phrixothrix Phycosecis Phyllaphis Phyllium Phyllonorycter Phyllopertha Phyllotreta Plagiodera Plateumaris Platychile Platypleura Platypus Platystomos Podagrica Poecilocoris Pogonostoma Pogonus Polistes Pollenia Polydrusus Polyphylla Pomponia Pressatia Priacma Procornitermes Promecognathus Propylea Prorhinotermes Protochauliodes Psathyromyia Pseudotetracha Psychodopygus Psychopsis Psylliodes Ptecticus Pterocomma Pyrrhidium Quercusia Rhagium Rhamphomyia Rhipidia Rhizophagus Rhodoneura Rhopalapion Rhopalosiphum Rhynchotermes Romualdius Rubiconia Salpingus Scaphidema Scaphisoma Scaptodera Scarites Schizotus Schlettererius Sciopemyia Scirtes Scolia Seladonia Semidalis Sericostoma Sericus Sermylassa Serritermes Sigalphus Sigara Silpha Sinocapritermes Sipyloidea Sisyra Sitona Smaragdina Sphaeroderma Sphecodes Sphedanolestes Sphindus Spilopyra Stenosialis Stenotrachelus Stenurella Stenus Stictoleptura Stigmella Stilpnonotus Stomoxys Strongylium Strophosoma Stylosomus Subcoccinella Sunius Syntermes Syrista Tachinus Takecallis Tasgius Tegra Temnoscheila Tenthredo Teredus Termitogeton Teslasena Tettigades Tettigonia Thanatophilus Therophilus Thoradonta Thremma Timarcha Timema Tineola Tiniocellus Tomicus Trachys Tragiscus Trechoblemus Trichophoromyia Trichopygomyia Trigonotylus Trinodes Trissolcus Tropiphorus Tuberolachnus Tychus Urodontus Urodus Venturia Vesperus Vespula Viannamyia Winthemia Wohlfahrtia Xanthostigma Xenos Xyleborinus Xyleborus Xylomya Zeuzera)
+
+# settings in script: $how_many_to_print = 1; ()$case_sensitive 	= 1;
+rm *.partial_mt
+for i in ${!partials[*]}; do tax=${partials[$i]};echo "number:$i genus:$tax"
+perl ~/usr_scripts/fetch_entries_from_genbank_flatfile.pl insecta_mtgenome_genus_partials $tax.partial_mt $tax
+done
+cat *.partial_mt > all.partial_mts
+rm *.partial_mt
+cat insecta_mtgenome_genus all.partial_mts > insecta_genus.complete_and_partial_MT_OG
+
+# get profiles 
+# name parse several refseqs, quickly curate, then use these to blast all 
+("complete" [TITLE] AND "genome" [TITLE] AND ("mitochondrial" [TITLE] OR "mitochondrion" [TITLE])) AND insecta [organism] AND refseq
+# save summary, file name insecta_refseq_mtgenome_summary.txt
+#$level = 1;# =order
+perl ~/usr_scripts/taxon_parse_genbank_summary_results.pl insecta_refseq_mtgenome_summary.txt 6960 1
+# ouptut file has list of accessions, paste to ncbi query box, save genbank full as file name:
+# 	insecta_refseq_mtgenome_order
+
+rm insecta_refseq_mtgenome_order.prot
+perl ~/usr_scripts/parse_translations_from_genbank_flatfile.pl -in insecta_refseq_mtgenome_order -out insecta_refseq_mtgenome_order.prot -out_suffx InsMT -id_format 5 -outfile_by_annotation -preferred_annotation_field 1
+rm insecta_genus.complete_and_partial_MT_OG.prot
+perl ~/usr_scripts/parse_translations_from_genbank_flatfile.pl -in insecta_genus.complete_and_partial_MT_OG -out insecta_genus.complete_and_partial_MT_OG.prot -out_suffx NULL -id_format 4 -preferred_annotation_field 1
+
+rm insecta_genus.complete_and_partial_MT_OG.prot.p*
+makeblastdb-2.2.28+-64bit -in insecta_genus.complete_and_partial_MT_OG.prot -dbtype prot -parse_seqids
+rm *InsMT_hits InsMT.all*hits
+InsMT_proteins=(InsMT*)
+for i in ${!InsMT_proteins[*]} 
+  do current_file=${InsMT_proteins[$i]}; echo $i current mito gene $current_file
+  blastp-2.2.28+-64bit -task blastp -db insecta_genus.complete_and_partial_MT_OG.prot -query $current_file -out $current_file.InsMT_hits -max_target_seqs 1000 -evalue 1e-20 -outfmt '6 qseqid sseqid evalue pident length sseq'
+done
+
+cat *InsMT_hits > InsMT.allhits
+rm InMT*
+perl ~/usr_scripts/parse_ortholog_results.pl -in InsMT.allhits -out_prefix InMT -filter_duplicates -output_id_format 3
+
+# alignment. takes ~4 hours:
+no_cpus=3;count=0
+rm InMT*.clo*
+split_query_files=(InMT*)
+for i in ${!split_query_files[*]}
+  do current_file=${split_query_files[$i]}; echo $i $current_file
+  /usr/local/bin/mafft --localpair --maxiterate 100 $current_file > $current_file.clo &
+  let count+=1
+  [[ $((count%no_cpus)) -eq 0 ]] && wait
+done
+
+# gene trees:
+rm InMT*.clo.SGT
+alignment_files=(InMT*.clo)
+for i in ${!alignment_files[*]}
+  do filename=${alignment_files[$i]};echo current file $i is $filename;
+  fasttree_2.1.7 -slow -gamma $filename > $filename.SGT
+done
+
+rm *.clo_pruned.fa
+for i in ${!alignment_files[*]}
+  do current_file=${alignment_files[$i]}; echo current file $i $current_file;
+  java -cp ~/software/phylotreepruner/src_and_wrapper_scripts/ PhyloTreePruner $current_file.SGT 5 $current_file 0.5 u
+done
+
+pruned_alignments=(InMT*.clo_pruned.fa)
+rm current_supermatrix2 InMT.smatrix partitionfile2 InMT.partitionfile charsetfile2 InMT.charsetfile
+perl ~/usr_scripts/concatenate_v2.pl -genus_level -missing_data_char ? -remove_accession 2 -matrices ${pruned_alignments[*]}
+mv current_supermatrix2 InMT.smatrix; mv partitionfile2 InMT.partitionfile; mv charsetfile2 InMT.charsetfile
+
+perl ~/usr_scripts/taxonomic_report.pl -seqfile InMT.smatrix -output tax_report.InMT.smatrix -node 6960 -fasta
+
+
+
+
+backbone_tree=/home/douglas/scripted_analyses/insect_TOL_analysis/backbone_tree/insctNUCL.RMmulti.sumtrees.procd.reroot
+mt_sequence_matrix=/home/douglas/scripted_analyses/insect_TOL_analysis/mtgenomes/InMT.smatrix
+
+# option in script that needs checking: $process_backbone_tree_terminal_IDs 
+# cant see the ratioanle for stopping bcackbone traverse where 'floating taxa' are met.
+# backbone nodes with small nuber floating taxa and lots of constrainables, can be turned into constraint
+# by temporary ommision of them
+# err on the side of removing them to allow another constraint.
+# build up constraint newick string from within sub traverse_backbone_tree_and_collapse
+# $process_backbone_tree_terminal_IDs = 2; 
+perl ~/usr_scripts/relational_constraints.pl -node 6960 -seqfile $mt_sequence_matrix -treefile $backbone_tree -outfile_prefix constraint201801
+
+
+perl ~/usr_scripts/prune_tree.pl -treefile constraint201801.less_basic_constraint_tree -seqfile $mt_sequence_matrix -output constraint201801.less_basic_constraint_tree.pruned
+
+rm $mt_sequence_matrix.phy
+perl ~/usr_scripts/format_conversion.pl $mt_sequence_matrix $mt_sequence_matrix.phy fasta phylip
+
+
+ #  new constraint method applied here
+ # [would be convenient if this was rooted at this stage]
+rm R*NUCL-MTconstr
+mpirun -n 2 raxmlHPC-7.2.8-ALPHA-MPI -f a -x 789 -p 789 -# 100 -s $mt_sequence_matrix.phy -n NUCL-MTconstr -m PROTCATMTART -c 24 -g constraint201801.less_basic_constraint_tree.pruned
+# treesearch time about half a week, perhaps about the same time for several hundred bootstraps
+# memory demand not too high, can be done on laptop
+
+sudo sumtrees.py --min-clade-freq=0.0 --log-frequency=10 --to-newick --replace --support-as-labels --burnin=0 --output=RAxML_bootstrap.NUCL-MTconstr2.sumtrees RAxML_bootstrap.NUCL-MTconstr2
+perl ~/usr_scripts/newick/process_raxmlEPA_outtree.pl RAxML_bootstrap.NUCL-MTconstr2.sumtrees
+
+
+# obtain species level data from ncbi
+
+for i in {1..136};do echo "file $i";
+  if [ -f gbinv$i.seq.gz ];
+    then
+      echo already have gbinv$i.seq.gz
+    else 
+      echo download gbinv$i.seq.gz 
+      wget ftp://ftp.ncbi.nih.gov/genbank/gbinv$i.seq.gz
+ fi
+done
+
+rm inv
+# some options set in script: $limit_taxon = 1;$limit_taxon_name = "Insecta";$upper_entry_length  = 100000;
+perl ~/usr_scripts/create_fasta_database_from_genbank_flatfiles.pl -out inv -outformat 1
+
+# -parse_species_only
+perl ~/usr_scripts/parse_ncbi_tax_database.pl -starting_node 50557 -ignore_subspecies
+
+# -binomials_only
+perl ~/usr_scripts/parse_taxon_from_fastafile.pl -fasta_db inv -taxa_key key_Oct2013_Insecta -id_format 3 -memory_efficient
+
+# consider removing indentical seqs (even if from different sp)
+perl ~/usr_scripts/preprocess_fasta_database.pl -in inv.parsed -filter_seq_length_outliers -lower_length_limit 200 -upper_length_limit 32000
+perl ~/usr_scripts/preprocess_fasta_database.pl -in inv.parsed.ng -reduce_redundency -usearch_command usearch4.2.66_i86linux32
+
+# split into several files to reduce memory of following step.
+makeblastdb-2.2.28+-64bit -in inv.parsed.ng.rr -dbtype nucl -parse_seqids -max_file_sz 40000000
+
+phylo_markers=(H03InsProf.muscle.fas)
+length_cutoffs=(500)
+
+# running time: overnight .... 
+rm H03InsProf.muscle.fas.blastout H03InsProf.muscle.fas.blastout.retreived
+blastn-2.2.28+-64bit -task blastn -db inv.parsed.ng.rr.00 -query H03InsProf.muscle.fas -out H03InsProf.muscle.fas.blastout.00 -word_size 10 -perc_identity 65 -dust no -strand both -evalue 1e-6 -num_threads 1 -max_target_seqs 100000 -outfmt '6 qseqid sseqid evalue pident length sstart send qframe sframe'
+blastn-2.2.28+-64bit -task blastn -db inv.parsed.ng.rr.01 -query H03InsProf.muscle.fas -out H03InsProf.muscle.fas.blastout.01 -word_size 10 -perc_identity 65 -dust no -strand both -evalue 1e-6 -num_threads 1 -max_target_seqs 100000 -outfmt '6 qseqid sseqid evalue pident length sstart send qframe sframe'
+blastn-2.2.28+-64bit -task blastn -db inv.parsed.ng.rr.02 -query H03InsProf.muscle.fas -out H03InsProf.muscle.fas.blastout.02 -word_size 10 -perc_identity 65 -dust no -strand both -evalue 1e-6 -num_threads 1 -max_target_seqs 100000 -outfmt '6 qseqid sseqid evalue pident length sstart send qframe sframe'
+blastn-2.2.28+-64bit -task blastn -db inv.parsed.ng.rr.03 -query H03InsProf.muscle.fas -out H03InsProf.muscle.fas.blastout.03 -word_size 10 -perc_identity 65 -dust no -strand both -evalue 1e-6 -num_threads 1 -max_target_seqs 100000 -outfmt '6 qseqid sseqid evalue pident length sstart send qframe sframe'
+blastn-2.2.28+-64bit -task blastn -db inv.parsed.ng.rr.04 -query H03InsProf.muscle.fas -out H03InsProf.muscle.fas.blastout.04 -word_size 10 -perc_identity 65 -dust no -strand both -evalue 1e-6 -num_threads 1 -max_target_seqs 100000 -outfmt '6 qseqid sseqid evalue pident length sstart send qframe sframe'
+blastn-2.2.28+-64bit -task blastn -db inv.parsed.ng.rr.05 -query H03InsProf.muscle.fas -out H03InsProf.muscle.fas.blastout.05 -word_size 10 -perc_identity 65 -dust no -strand both -evalue 1e-6 -num_threads 1 -max_target_seqs 100000 -outfmt '6 qseqid sseqid evalue pident length sstart send qframe sframe'
+
+# combine results files into one
+cat H03InsProf.muscle.fas.blastout.0* > H03InsProf.muscle.fas.blastout
+rm H03InsProf.muscle.fas.blastout.0*
+
+perl ~/usr_scripts/parse_hits.pl inv.parsed.ng.rr H03InsProf.muscle.fas.blastout 60 1 500 2 blastdbcmd-2.2.28+-64bit
+
+
+
+
+# add DNA barcodes from BOLD
+
+wget http://www.boldsystems.org/index.php/API_Public/sequence?taxon=Insecta
+
+# save as BOLD_API_insecta
+# at least on my system quite an uncertain step, download is often interupted, but with no warning/indication.
+# better to download twice, retriving files of same size of large size, then this has probably downloaded correctly.
+
+rm BOLD_API.parsed
+perl process_BOLD_API_seqIDs.pl BOLD_API_insecta
+ # output is BOLD_API.parsed
+
+
+
+# large section on species level clustering not shown, current iteration only fully (taxonomically) labeled data is used.
+# thus just the following script should suffice
+
+perl ~/usr_scripts/species_filter.pl -in [input_file_name] -format 1 -filter_method 2
+
+# alignment of barcodes.
+reference_alignment=H03InsProf.muscle.no_gaps.fas
+rm BlastOUT alignerOUT
+blastn-2.2.28+-64bit -task blastn -query all_unaln -subject $reference_alignment -out BlastOUT -word_size 10 -perc_identity 60 -max_target_seqs 1 -evalue 1e-8 -dust no -strand plus -outfmt '6 qseqid sseqid evalue pident length'
+perl ~/usr_scripts/aligner.pl BlastOUT $reference_alignment all_unaln alignerOUT
+
+# some data disapears at this stage because it is unalignable.
+
+
+#  RETRIEVAL OF other genes, for species level analysis
+# note, no single alignment software performed satisfactorily on all markers,
+# thus more than one method was used, after testing several for each marker 
+
+
+
+
+cp ~/scripted_analyses/COIevol/analysis/28s_InsectsProfile.mafft 28s_queries
+
+cytb_queries=/home/douglas/scripted_analyses/COIevol/analysis/primate_diet_cytb.mafft
+blastn-2.2.28+-64bit -task blastn -db inv.parsed.ng.rr -query $cytb_queries -out cytb.blastout -word_size 10 -perc_identity 40 -dust no -strand both -evalue 1e-6 -num_threads 1 -max_target_seqs 200000 -outfmt '6 qseqid sseqid evalue pident length sstart send qframe sframe'
+blastn-2.2.28+-64bit -task blastn -db inv.parsed.ng.rr -query 28s_queries -out 28S.blastout -word_size 10 -perc_identity 40 -dust no -strand both -evalue 1e-6 -num_threads 1 -max_target_seqs 200000 -outfmt '6 qseqid sseqid evalue pident length sstart send qframe sframe'
+
+rm cytb.blastout.retreived 28S.blastout.retreived
+perl ~/usr_scripts/parse_hits.pl inv.parsed.ng.rr cytb.blastout 60 1 300 2 blastdbcmd-2.2.28+-64bit
+perl ~/usr_scripts/parse_hits.pl inv.parsed.ng.rr 28S.blastout 60 1 250 2 blastdbcmd-2.2.28+-64bit
+# remove the cytbs from the mammal diet study... they are only labeled arthropod environ sample, so shouldnt be in
+
+
+ls /home/douglas/scripted_analyses/COIevol/corrections/species_dense/sample_db_OUT.AAAblastout.mcl_clusters*
+
+# define markers to be used according to their reference data. also need some specification of expected length of each
+phylo_markers=(sample_db_OUT.AAAblastout.mcl_clusters.12S.mafft.processed sample_db_OUT.AAAblastout.mcl_clusters.16S.mafft.colrm.processed sample_db_OUT.AAAblastout.mcl_clusters.18S.prank.1.fas.trimmed.colrm.fas sample_db_OUT.AAAblastout.mcl_clusters.EF1a.mafft.processed sample_db_OUT.AAAblastout.mcl_clusters.RP2.mafft.processed sample_db_OUT.AAAblastout.mcl_clusters.wnt.mafft.processed)
+length_cutoffs=(250 360 800 450 700 350)
+
+# search for and retrieve each marker, from the local database.
+for i in ${!phylo_markers[*]}
+do
+ current_file=${phylo_markers[$i]};current_cutoff=${length_cutoffs[$i]};echo file $i is $current_file cutoff $current_cutoff
+ ## only need do this first time:
+ # cp /home/douglas/scripted_analyses/COIevol/corrections/species_dense/$current_file .
+ rm $current_file.blastout $current_file.blastout.retreived
+ blastn-2.2.28+-64bit -task blastn -db inv.parsed.ng.rr -query $current_file -out $current_file.blastout -word_size 10 -perc_identity 40 -dust no -strand both -evalue 1e-6 -num_threads 1 -max_target_seqs 200000 -outfmt '6 qseqid sseqid evalue pident length sstart send qframe sframe'
+ perl ~/usr_scripts/parse_hits.pl inv.parsed.ng.rr $current_file.blastout 60 1 $current_cutoff 2 blastdbcmd-2.2.28+-64bit
+done
+
+# species level filtering according to species annotation
+phylo_markers=(cytb 28S sample_db_OUT.AAAblastout.mcl_clusters.12S.mafft.processed sample_db_OUT.AAAblastout.mcl_clusters.16S.mafft.colrm.processed sample_db_OUT.AAAblastout.mcl_clusters.18S.prank.1.fas.trimmed.colrm.fas sample_db_OUT.AAAblastout.mcl_clusters.EF1a.mafft.processed sample_db_OUT.AAAblastout.mcl_clusters.RP2.mafft.processed sample_db_OUT.AAAblastout.mcl_clusters.wnt.mafft.processed)
+for i in ${!phylo_markers[*]};do 
+   current_file=${phylo_markers[$i]}; echo file $i is $current_file;
+   perl ~/usr_scripts/species_filter.pl -in $current_file.blastout.retreived -format 1 -identified_species_only -filter_method 2
+done
+
+# Alignment of species rich data, one of the most challenging steps.
+	# CYTB, clustal omega works ok.
+clustalo-1.2.0 --profile1=/home/douglas/scripted_analyses/COIevol/analysis/primate_diet_cytb.mafft --in=cytb.blastout.retreived.ID_filtered -outfile=insectCYTB.clo --guidetree-out=insectCYTB.CLO_guidetree --seqtype=DNA --outfmt=fa --threads=4 --log=clustallogfile
+	# 28S, very challenging marker, requires BlastAlign.
+perl ~/usr_scripts/consensus_sequence_fasta.pl /home/douglas/scripted_analyses/COIevol/analysis/28s_InsectsProfile.mafft 28s_InsectsProfile.mafft.consensus
+perl ~/usr_scripts/change_tobycode.pl 28S.blastout.retreived.ID_filtered
+cat 28S.blastout.retreived.ID_filtered.recoded 28s_InsectsProfile.mafft.consensus > blastalign_in
+perl ~/software/blastalign/BlastAlign2 -i blastalign_in -r consensus
+perl ~/usr_scripts/format_conversion.pl blastalign_in.phy 28S.blastout.retreived.ID_filtered.recoded.fas phylip fasta
+perl ~/usr_scripts/insert_tobycode_to_fastafile.pl 28S.blastout.retreived.ID_filtered.recoded.fas 28S.blastout.retreived.ID_filtered.recode_key 28S.blastout.retreived.ID_filtered.blastalign
+	# 18S
+# rm sample_db_OUT.AAAblastout.mcl_clusters.18S.prank.1.fas.trimmed.colrm.fas.blastout.retreived.ID_filtered.mafft
+/usr/local/bin/mafft --retree 2 --legacygappenalty sample_db_OUT.AAAblastout.mcl_clusters.18S.prank.1.fas.trimmed.colrm.fas.blastout.retreived.ID_filtered > 18S.blastout.retreived.ID_filtered.mafft
+# $column_removal_cutoff(0.99)
+perl ~/usr_scripts/alignment_processing/rm_alignment_columns.pl 18S.blastout.retreived.ID_filtered.mafft
+	# others:
+new_markers=(sample_db_OUT.AAAblastout.mcl_clusters.12S.mafft.processed sample_db_OUT.AAAblastout.mcl_clusters.16S.mafft.colrm.processed sample_db_OUT.AAAblastout.mcl_clusters.EF1a.mafft.processed sample_db_OUT.AAAblastout.mcl_clusters.RP2.mafft.processed sample_db_OUT.AAAblastout.mcl_clusters.wnt.mafft.processed)
+for i in ${!new_markers[*]};do current_file=${new_markers[$i]}; echo file $i is $current_file;
+ # ls $current_file.blastout.retreived.ID_filtered
+ clustalo-1.2.0 --profile1=$current_file --in=$current_file.blastout.retreived.ID_filtered -outfile=$current_file.blastout.retreived.ID_filtered.clo --guidetree-out=$current_file.CLO_guidetree --seqtype=DNA --outfmt=fa --threads=4 --log=clustallogfile
+done
+
+
+mv insCOI insCOI_OLD
+mv alignerOUT insCOI
+perl ~/usr_scripts/alignment_processing/rm_alignment_columns.pl insCOI
+
+# alignments should now be available
+mv insectCYTB.clo insCYTB
+mv 28S.blastout.retreived.ID_filtered.blastalign ins28S
+mv 18S.blastout.retreived.ID_filtered.mafft.colrm ins18S
+mv sample_db_OUT.AAAblastout.mcl_clusters.12S.mafft.processed.blastout.retreived.ID_filtered.clo ins12S
+mv sample_db_OUT.AAAblastout.mcl_clusters.16S.mafft.colrm.processed.blastout.retreived.ID_filtered.clo ins16S
+mv sample_db_OUT.AAAblastout.mcl_clusters.EF1a.mafft.processed.blastout.retreived.ID_filtered.clo insEF1a
+mv sample_db_OUT.AAAblastout.mcl_clusters.RP2.mafft.processed.blastout.retreived.ID_filtered.clo insRP2
+mv sample_db_OUT.AAAblastout.mcl_clusters.wnt.mafft.processed.blastout.retreived.ID_filtered.clo insWNT
+
+# just for checking alignments, makes taxonomic sorting easier:
+rm *.taxlabs
+rm *.colrm2
+
+# alignment processing, remove uninformative columns
+alignments=(insCOI insCYTB ins28S ins18S ins12S ins16S insEF1a insRP2 insWNT)
+# current_file=insCOI
+for i in ${!alignments[*]};do 
+   current_file=${alignments[$i]}; echo file $i is $current_file;
+   # @ranksarray = (" order", " family")$filter_level  = 0;
+   # $column_removal_cutoff,  0.98?
+   perl ~/usr_scripts/alignment_processing/rm_alignment_columns.pl $current_file $current_file.colrm2
+done
+
+# example output:
+# insCOI;	1537 columns, of which 	803 removed. 	734 remaining
+# insCYTB;	545 columns, of which 	54 removed. 	491 remaining
+# ins28S;	737 columns, of which 	307 removed. 	430 remaining
+# ins18S; 	3539 columns, of which 	0 removed. 	3539 remaining
+# ins12S;	642 columns, of which 	107 removed. 	535 remaining
+# ins16S;	979 columns, of which 	186 removed. 	793 remaining
+# insEF1a;	1494 columns, of which 	197 removed. 	1297 remaining
+# insRP2;	913 columns, of which 	59 removed. 	854 remaining
+# insWNT;	650 columns, of which 	73 removed. 	577 remaining
+
+# manually order them correctly, COI first and descending sampling:
+ls ins*.colrm
+
+# make a supermatrix
+rm current_supermatrix2 insect9geneA; mv partitionfile2 insect9geneA.partitionfile; mv charsetfile2 insect9gene.charsetfile
+perl ~/usr_scripts/concatenate_v2.pl -missing_data_char ? -remove_accession 2 -required_data Y???????? -matrices insCOI ins28S.colrm insCYTB.colrm ins16S.colrm ins12S.colrm ins18S.colrm insEF1a.colrm insWNT.colrm insRP2.colrm
+
+# change names of output files
+mv current_supermatrix2 insect9geneA; mv partitionfile2 insect9geneA.partitionfile; mv charsetfile2 insect9gene.charsetfile;
+# lets take a look: 
+grep ">" insect9geneA > supermatrix_ID_lines
+# need to put fully identifieds and genus identifieds into one file, rest into seperate file,
+rm genus_labelled.fas not_genus_labelled.fas
+perl ~/usr_scripts/extract_genus_labelled_from_fasta.pl insect9geneA
+grep ">" genus_labelled.fas | wc -l # 72035
+
+
+perl ~/usr_scripts/concatenate_v2.pl -missing_data_char ? -remove_accession 2 -required_data Y???????? -matrices insCOI ins28S.colrm2 insCYTB.colrm2 ins16S.colrm2 ins12S.colrm2 ins18S.colrm2 insEF1a.colrm2 insWNT.colrm2 insRP2.colrm2
+mv current_supermatrix2 insect9geneB
+
+# species matrix uses 28gb with fasttree, still a bit excessive ... reduce a little more by removing columns with not much coverage
+# on the whole alignment, try 0.996
+perl ~/usr_scripts/alignment_processing/rm_alignment_columns.pl insect9geneB insect9geneB.reduced
+
+
+
+
+
+mt_backbone_newick=/home/douglas/scripted_analyses/insect_TOL_analysis/mtgenomes/RAxML_bestTree.RAxML_bootstrap.NUCL-MTconstr2.sumtrees.procd.reroot
+sp_matrix=/home/douglas/scripted_analyses/insect_TOL_analysis/species_level/insect9geneA
+perl ~/usr_scripts/backbone_constraints_newick.pl -node 6960 -seqfile $sp_matrix -treefile $mt_backbone_newick -outfile_prefix BCNtest -backbone_terminal_format 0 -constrain_ranks suborder infraorder superfamily family subfamily genus
+
+
+perl ~/usr_scripts/remove_fasta_entries.pl $sp_matrix sp_constraint_201803.list_constrained_members sp_matrix.pruned
+
+# 69170 9132
+perl ~/usr_scripts/format_conversion.pl sp_matrix.pruned sp_matrix.pruned.phy fasta phylip
+rm RA*NUCL-MT-SP_constrained_subset
+raxmlHPC-8.2.4 -s sp_matrix.pruned.phy -n NUCL-MT-SP_constrained_subset.1001 -m GTRCAT -c 4 -p 1001 -g constraint201801.less_basic_constraint_tree.pruned2
+# partitoned run will have: -q insect9geneA.partitionfile
+
+
+
+
+
+
